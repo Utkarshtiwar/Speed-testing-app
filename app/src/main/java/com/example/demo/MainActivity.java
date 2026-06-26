@@ -1,80 +1,112 @@
 package com.example.demo;
 
-import android.annotation.SuppressLint;
+import android.graphics.Color;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
-import android.webkit.WebChromeClient;
-import android.webkit.WebSettings;
+import android.view.View;
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
-import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.graphics.Insets;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowInsetsCompat;
+import androidx.appcompat.widget.Toolbar;
+
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.card.MaterialCardView;
 
 public class MainActivity extends AppCompatActivity {
 
-    WebView webView;
-    TextView txtSpeed;
-    Handler handler = new Handler(Looper.getMainLooper());
-    @SuppressLint("SetJavaScriptEnabled")
+    private WebView webView;
+    private SpeedMeterView speedMeterView;
+    private TextView tvDownload;
+    private TextView tvUpload;
+    private TextView tvLatency;
+    private TextView tvStatus;
+    private ProgressBar progressBar;
+    private MaterialButton btnStart;
+
+    private FastSpeedReader fastSpeedReader;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
-        webView = findViewById(R.id.webView);
-        txtSpeed = findViewById(R.id.txtSpeed);
-        WebSettings settings = webView.getSettings();
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setLoadWithOverviewMode(true);
-        settings.setUseWideViewPort(true);
 
-        webView.setWebChromeClient(new WebChromeClient());
+        // Toolbar
+        Toolbar toolbar = findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
 
-        webView.setWebViewClient(new WebViewClient(){
+        // Views
+        webView       = findViewById(R.id.webView);
+        speedMeterView = findViewById(R.id.speedMeterView);
+        tvDownload    = findViewById(R.id.tvDownload);
+        tvUpload      = findViewById(R.id.tvUpload);
+        tvLatency     = findViewById(R.id.tvLatency);
+        tvStatus      = findViewById(R.id.tvStatus);
+        progressBar   = findViewById(R.id.progressBar);
+        btnStart      = findViewById(R.id.btnStart);
 
+        // Init reader
+        fastSpeedReader = new FastSpeedReader(this, webView, new FastSpeedReader.SpeedCallback() {
             @Override
-            public void onPageFinished(WebView view, String url) {
-
-                super.onPageFinished(view, url);
-
-                startReadingSpeed();
-
+            public void onSpeedUpdate(SpeedResult result) {
+                runOnUiThread(() -> updateUI(result));
             }
 
+            @Override
+            public void onError(String error) {
+                runOnUiThread(() -> tvStatus.setText("Error: " + error));
+            }
         });
 
-        webView.loadUrl("https://fast.com");
+        btnStart.setOnClickListener(v -> startTest());
     }
 
-    private void startReadingSpeed(){
+    private void startTest() {
+        btnStart.setEnabled(false);
+        progressBar.setVisibility(View.VISIBLE);
+        tvStatus.setText("Connecting to Fast.com…");
+        tvDownload.setText("— Mbps");
+        tvUpload.setText("— Mbps");
+        tvLatency.setText("— ms");
+        speedMeterView.reset();
+        fastSpeedReader.startTest();
+    }
 
-        handler.postDelayed(new Runnable() {
+    private void updateUI(SpeedResult result) {
+        // Parse download speed for the meter
+        float downloadVal = 0f;
+        try {
+            String raw = result.getDownloadSpeed().replaceAll("[^0-9.]", "");
+            if (!raw.isEmpty()) downloadVal = Float.parseFloat(raw);
+        } catch (NumberFormatException ignored) {}
 
-            @Override
-            public void run() {
+        speedMeterView.setSpeed(downloadVal);
 
-                webView.evaluateJavascript(
-                        "document.getElementById('speed-value').innerText;",
-                        value -> {
+        String dl = result.getDownloadSpeed();
+        String ul = result.getUploadSpeed();
+        String lat = result.getLatency();
 
-                            value = value.replace("\"","");
+        tvDownload.setText((dl.isEmpty() || dl.equals("0")) ? "— Mbps" : dl + " Mbps");
+        tvUpload.setText((ul.isEmpty() || ul.equals("0"))   ? "— Mbps" : ul + " Mbps");
+        tvLatency.setText((lat.isEmpty() || lat.equals("0")) ? "— ms"  : lat + " ms");
 
-                            txtSpeed.setText("Speed : "+value+" Mbps");
+        if (result.isCompleted()) {
+            tvStatus.setText("✓ Test Completed");
+            tvStatus.setTextColor(Color.parseColor("#00FF88"));
+            progressBar.setVisibility(View.GONE);
+            speedMeterView.stopAnimation();
+            btnStart.setEnabled(true);
+        } else {
+            tvStatus.setText("● Testing…");
+            tvStatus.setTextColor(Color.parseColor("#00C9FF"));
+        }
+    }
 
-                            handler.postDelayed(this,1000);
-
-                        });
-
-            }
-
-        },3000);
-
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (fastSpeedReader != null) {
+            fastSpeedReader.destroy();
+        }
     }
 }
