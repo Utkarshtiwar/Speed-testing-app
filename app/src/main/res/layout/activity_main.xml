@@ -6,13 +6,7 @@
     android:layout_height="match_parent"
     android:background="#0D0D1A">
 
-    <!-- Invisible WebView - kept alive in background -->
-    <WebView
-        android:id="@+id/webView"
-        android:layout_width="1dp"
-        android:layout_height="1dp"
-        android:alpha="0"
-        android:visibility="invisible" />
+    <!-- WebView removed — native networking replaces it -->
 
     <com.google.android.material.appbar.AppBarLayout
         android:id="@+id/appBarLayout"

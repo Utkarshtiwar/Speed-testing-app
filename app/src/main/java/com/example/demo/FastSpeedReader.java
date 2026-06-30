@@ -1,16 +1,23 @@
 package com.example.demo;
 
-import android.annotation.SuppressLint;
 import android.content.Context;
-import android.os.Handler;
-import android.os.Looper;
-import android.webkit.WebChromeClient;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
 
-import org.json.JSONObject;
-
+/**
+ * FastSpeedReader — native replacement for the old WebView-based implementation.
+ *
+ * The public API is IDENTICAL to the original class so MainActivity.java requires
+ * zero changes:
+ *
+ *   new FastSpeedReader(context, webView, callback)  ← webView param now unused but accepted
+ *   fastSpeedReader.startTest()
+ *   fastSpeedReader.destroy()
+ *
+ * Internally this delegates to SpeedTestManager which runs the full
+ * token → latency → download → upload pipeline using OkHttp.
+ *
+ * The WebView parameter is kept in the constructor signature so that
+ * MainActivity does not need to be modified at all — it is simply ignored.
+ */
 public class FastSpeedReader {
 
     public interface SpeedCallback {
@@ -18,126 +25,51 @@ public class FastSpeedReader {
         void onError(String error);
     }
 
-    private WebView webView;
-    private Handler handler;
-    private Runnable pollRunnable;
-    private SpeedCallback callback;
-    private boolean isPolling = false;
-    private static final long POLL_INTERVAL_MS = 1500;
+    private SpeedTestManager manager;
+    private final Context context;
+    private final SpeedCallback callback;
 
-    private static final String JS_EXTRACT =
-            "(function() {" +
-                    "  try {" +
-                    "    var dl = document.getElementById('speed-value');" +
-                    "    var ul = document.getElementById('upload-value');" +
-                    "    var lat = document.getElementById('latency-value');" +
-                    "    var status = dl ? dl.className : '';" +
-                    "    return JSON.stringify({" +
-                    "      download: dl ? dl.innerText.trim() : '0'," +
-                    "      upload:   ul ? ul.innerText.trim() : '0'," +
-                    "      latency:  lat ? lat.innerText.trim() : '0'," +
-                    "      status:   status" +
-                    "    });" +
-                    "  } catch(e) {" +
-                    "    return JSON.stringify({download:'0',upload:'0',latency:'0',status:''});" +
-                    "  }" +
-                    "})()";
-
-    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
-    public FastSpeedReader(Context context, WebView webView, SpeedCallback callback) {
-        this.webView = webView;
+    /**
+     * @param context  Android context (not used directly, kept for API compat)
+     * @param webView  IGNORED — parameter kept so MainActivity compiles unchanged
+     * @param callback result/error callbacks, always delivered on the main thread
+     */
+    public FastSpeedReader(Context context, Object webView, SpeedCallback callback) {
+        this.context  = context;
         this.callback = callback;
-        this.handler = new Handler(Looper.getMainLooper());
-
-        WebSettings settings = webView.getSettings();
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(
-                "Mozilla/5.0 (Linux; Android 10; Mobile) " +
-                        "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                        "Chrome/120.0.0.0 Mobile Safari/537.36"
-        );
-
-        webView.setWebChromeClient(new WebChromeClient());
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
-                startPolling();
-            }
-        });
     }
 
+    /** Starts the speed test. Non-blocking. */
     public void startTest() {
-        stopPolling();
-        webView.loadUrl("https://fast.com");
-    }
+        // Cancel any previous test still running
+        if (manager != null) {
+            manager.destroy();
+        }
 
-    private void startPolling() {
-        isPolling = true;
-        pollRunnable = new Runnable() {
+        manager = new SpeedTestManager(new SpeedTestManager.Listener() {
             @Override
-            public void run() {
-                if (!isPolling) return;
-                pollValues();
-                handler.postDelayed(this, POLL_INTERVAL_MS);
-            }
-        };
-        handler.postDelayed(pollRunnable, POLL_INTERVAL_MS);
-    }
-
-    private void pollValues() {
-        if (webView == null) return;
-        webView.evaluateJavascript(JS_EXTRACT, value -> {
-            if (value == null || value.equals("null")) return;
-            try {
-                // Strip surrounding quotes if present (evaluateJavascript wraps string in quotes)
-                String json = value;
-                if (json.startsWith("\"") && json.endsWith("\"")) {
-                    json = json.substring(1, json.length() - 1);
-                    json = json.replace("\\\"", "\"").replace("\\\\", "\\");
-                }
-                JSONObject obj = new JSONObject(json);
-                String download = obj.optString("download", "0");
-                String upload   = obj.optString("upload",   "0");
-                String latency  = obj.optString("latency",  "0");
-                String status   = obj.optString("status",   "");
-
-                boolean completed = status.contains("succeeded");
-
-                SpeedResult result = new SpeedResult(download, upload, latency, completed);
-
+            public void onUpdate(SpeedResult result) {
                 if (callback != null) {
                     callback.onSpeedUpdate(result);
                 }
+            }
 
-                if (completed) {
-                    stopPolling();
-                }
-            } catch (Exception e) {
+            @Override
+            public void onError(String message) {
                 if (callback != null) {
-                    callback.onError(e.getMessage());
+                    callback.onError(message);
                 }
             }
         });
+
+        manager.start();
     }
 
-    public void stopPolling() {
-        isPolling = false;
-        if (handler != null && pollRunnable != null) {
-            handler.removeCallbacks(pollRunnable);
-        }
-    }
-
+    /** Releases all resources. Safe to call from onDestroy(). */
     public void destroy() {
-        stopPolling();
-        if (webView != null) {
-            webView.stopLoading();
-            webView.destroy();
-            webView = null;
+        if (manager != null) {
+            manager.destroy();
+            manager = null;
         }
-        handler = null;
-        callback = null;
     }
 }
