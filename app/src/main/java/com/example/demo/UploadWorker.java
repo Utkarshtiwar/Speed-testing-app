@@ -76,19 +76,34 @@ public class UploadWorker implements Runnable {
             @Override
             public void writeTo(BufferedSink sink) throws IOException {
                 long totalSent = 0;
+                Log.d(TAG, "writeTo() START");
                 long lastLogTime = System.currentTimeMillis();
                 while (!cancelled && totalSent < DECLARED_CONTENT_LENGTH) {
                     long writeStart = System.currentTimeMillis();
                     long remaining = DECLARED_CONTENT_LENGTH - totalSent;
                     int toWrite = (int) Math.min(CHUNK_SIZE, remaining);
+                    Log.d(TAG,
+                            "WRITE START"
+                                    + " totalSent=" + totalSent
+                                    + " toWrite=" + toWrite
+                                    + " cancelled=" + cancelled);
                     sink.write(CHUNK, 0, toWrite);
+                    Log.d(TAG, "FLUSH START");
                     sink.flush();
+                    Log.d(TAG, "FLUSH DONE");
                     long writeElapsed = System.currentTimeMillis() - writeStart;
                     if (writeElapsed > 200) {
                         Log.w(TAG, "SLOW WRITE url=" + url + " tookMs=" + writeElapsed + " totalSent=" + totalSent);
                     }
                     calculator.addUploadBytes(toWrite);
+                    Log.d(TAG,
+                            "COUNTER UPDATED"
+                                    + " added=" + toWrite
+                                    + " newTotal=" + (totalSent + toWrite));
                     totalSent += toWrite;
+                    Log.d(TAG,
+                            "LOOP COMPLETE"
+                                    + " totalSent=" + totalSent);
                 }
                 Log.d(TAG, "writeTo loop EXIT totalSent=" + totalSent + " cancelled=" + cancelled);
             }
@@ -111,14 +126,21 @@ public class UploadWorker implements Runnable {
                 .build();
 
         activeCall = client.newCall(request);
+        Log.d(TAG, "execute() START");
+        long executeStart = System.currentTimeMillis();
 
         try (Response response = activeCall.execute()) {
+            Log.d(TAG,
+                    "execute() FINISHED after "
+                            + (System.currentTimeMillis() - executeStart)
+                            + " ms");
             Log.d(TAG, "UPLOAD response code=" + response.code());
             if (!response.isSuccessful()) {
                 Log.w(TAG, "UPLOAD non-2xx response: " + response.code() + " " + response.message());
             }
             // Response body doesn't matter — we only care about bytes sent
             if (response.body() != null) {
+                Log.d(TAG, "Closing response body");
                 response.body().close();
             }
         } catch (IOException e) {
@@ -128,7 +150,10 @@ public class UploadWorker implements Runnable {
                 // This was previously swallowed silently — it is NOT expected
                 // when cancelled == false, and is almost certainly the reason
                 // uploads appeared to "never complete".
-                Log.e(TAG, "UPLOAD WORKER FAILED (not a cancellation): " + e, e);
+                Log.e(TAG,
+                        "UPLOAD FAILED"
+                                + " cancelled=" + cancelled,
+                        e);
             }
         }
 
@@ -136,6 +161,8 @@ public class UploadWorker implements Runnable {
     }
 
     public void cancel() {
+        Log.d(TAG,
+                "cancel() called");
         cancelled = true;
         Call call = activeCall;
         if (call != null) {
