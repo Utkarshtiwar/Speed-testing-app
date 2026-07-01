@@ -1,5 +1,7 @@
 package com.example.demo;
 
+import android.util.Log;
+
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -57,22 +59,32 @@ public class DownloadWorker implements Runnable {
         activeCall = client.newCall(request);
 
         try (Response response = activeCall.execute()) {
+            Log.d("DownloadWorker", "url=" + url + " code=" + response.code());
             if (!response.isSuccessful() && response.code() != 206) {
+                Log.w("DownloadWorker", "NON-SUCCESS response, aborting worker: " + response.code() + " url=" + url);
                 return;  // Non-fatal — other workers continue
             }
 
             ResponseBody body = response.body();
-            if (body == null) return;
+
+            if (body == null) {
+                Log.w("DownloadWorker", "NULL body, aborting worker url=" + url);
+                return;
+            }
 
             try (InputStream is = body.byteStream()) {
                 byte[] buffer = new byte[BUFFER_SIZE];
                 int bytesRead;
+                long totalForThisWorker = 0;
                 while (!cancelled && (bytesRead = is.read(buffer)) != -1) {
+                    totalForThisWorker += bytesRead;
                     calculator.addDownloadBytes(bytesRead);
                 }
+                Log.d("DownloadWorker", "EXIT normally url=" + url + " totalBytes=" + totalForThisWorker + " cancelled=" + cancelled);
             }
         } catch (IOException e) {
             // Expected when cancel() is called or network drops — not an error
+            Log.e("DownloadWorker", "IOException url=" + url + " cancelled=" + cancelled + " msg=" + e.getMessage(), e);
         }
     }
 

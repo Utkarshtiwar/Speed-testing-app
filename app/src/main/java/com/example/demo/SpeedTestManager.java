@@ -219,10 +219,12 @@ public class SpeedTestManager {
             DownloadWorker worker = new DownloadWorker(httpClient, urls.get(i), calculator);
             synchronized (downloadWorkers) { downloadWorkers.add(worker); }
             futures.add(workExecutor.submit(worker));
+            Log.d(TAG, "Submitted worker #" + i + " url=" + urls.get(i));
         }
         Log.d(TAG, "DOWNLOADING — " + futures.size() + " workers submitted");
 
         // Wait for measurement window
+        Log.d(TAG, "downloadWorkers.size()=" + downloadWorkers.size() + " — entering sleep window");
         Thread.sleep(DOWNLOAD_DURATION_MS);
 
         // Stop sampling and capture the final speed IMMEDIATELY — before any

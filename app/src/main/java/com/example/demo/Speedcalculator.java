@@ -1,5 +1,7 @@
 package com.example.demo;
 
+import android.util.Log;
+
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -66,6 +68,13 @@ public class Speedcalculator {
         if (mode == Mode.DOWNLOAD) {
             long current = totalBytesDownload.get();
             long delta   = current - lastDownloadSnapshot;
+            Log.d("Speedcalculator",
+                    "DOWNLOAD SAMPLE\n" +
+                            "totalBytes=" + current +
+                            "\ndelta=" + delta +
+                            "\nlastSnapshot=" + lastDownloadSnapshot +
+                            "\nbufferIndex=" + bufferIndex +
+                            "\nfilledSlots=" + filledSlots);
             lastDownloadSnapshot = current;
 
             // bytes/intervalSec → bits/sec → Mbps
@@ -74,9 +83,22 @@ public class Speedcalculator {
 
             downloadBuffer[bufferIndex % BUFFER_SLOTS] = mbps;
             currentDownloadMbps = averageOf(downloadBuffer);
+            Log.d("Speedcalculator",
+                    "DOWNLOAD RESULT\n" +
+                            "instantMbps=" + mbps +
+                            "\naverageMbps=" + currentDownloadMbps +
+                            "\nbufferIndex=" + bufferIndex +
+                            "\nfilledSlots=" + filledSlots);
         } else {
             long current = totalBytesUpload.get();
             long delta   = current - lastUploadSnapshot;
+            Log.d("Speedcalculator",
+                    "UPLOAD SAMPLE\n" +
+                            "totalBytes=" + current +
+                            "\ndelta=" + delta +
+                            "\nlastSnapshot=" + lastUploadSnapshot +
+                            "\nbufferIndex=" + bufferIndex +
+                            "\nfilledSlots=" + filledSlots);
             lastUploadSnapshot = current;
 
             double bytesPerSec = delta / (SAMPLE_INTERVAL_MS / 1000.0);
@@ -84,6 +106,12 @@ public class Speedcalculator {
 
             uploadBuffer[bufferIndex % BUFFER_SLOTS] = mbps;
             currentUploadMbps = averageOf(uploadBuffer);
+            Log.d("Speedcalculator",
+                    "UPLOAD RESULT\n" +
+                            "instantMbps=" + mbps +
+                            "\naverageMbps=" + currentUploadMbps +
+                            "\nbufferIndex=" + bufferIndex +
+                            "\nfilledSlots=" + filledSlots);
         }
 
         bufferIndex++;
@@ -92,6 +120,8 @@ public class Speedcalculator {
 
     /** Resets all counters and buffers. Call before starting a new test. */
     public synchronized void reset() {
+        Log.d("Speedcalculator",
+                "RESET() CALLED");
         totalBytesDownload.set(0);
         totalBytesUpload.set(0);
         lastDownloadSnapshot = 0;
@@ -105,20 +135,34 @@ public class Speedcalculator {
         filledSlots    = 0;
         currentDownloadMbps = 0;
         currentUploadMbps   = 0;
+        Log.d("Speedcalculator",
+                "RESET COMPLETE");
     }
 
     /** Reset only upload-related state when switching from download → upload phase. */
     public synchronized void resetUpload() {
+        Log.d("Speedcalculator",
+                "RESET UPLOAD CALLED");
         totalBytesUpload.set(0);
         lastUploadSnapshot = 0;
         for (int i = 0; i < BUFFER_SLOTS; i++) {
             uploadBuffer[i] = 0;
         }
         currentUploadMbps = 0;
+        Log.d("Speedcalculator",
+                "RESET UPLOAD COMPLETE");
     }
 
-    public double getCurrentDownloadMbps() { return currentDownloadMbps; }
-    public double getCurrentUploadMbps()   { return currentUploadMbps;   }
+    public double getCurrentDownloadMbps() {
+        Log.d("Speedcalculator",
+                "getCurrentDownloadMbps() = " + currentDownloadMbps);
+        return currentDownloadMbps;
+    }
+    public double getCurrentUploadMbps() {
+        Log.d("Speedcalculator",
+                "getCurrentUploadMbps() = " + currentUploadMbps);
+        return currentUploadMbps;
+    }
 
     /** Converts Mbps to a formatted string with 1 decimal place. */
     public static String format(double mbps) {
@@ -126,11 +170,34 @@ public class Speedcalculator {
     }
 
     private double averageOf(double[] buf) {
-        if (filledSlots == 0) return 0.0;
+
+        if (filledSlots == 0) {
+            Log.d("Speedcalculator",
+                    "averageOf() filledSlots=0 returning 0");
+            return 0.0;
+        }
+
         double sum = 0;
+
         int slots = Math.min(filledSlots, BUFFER_SLOTS);
-        for (int i = 0; i < slots; i++) sum += buf[i];
-        return sum / slots;
+
+        StringBuilder values = new StringBuilder();
+
+        for (int i = 0; i < slots; i++) {
+            sum += buf[i];
+            values.append(buf[i]).append(" ");
+        }
+
+        double result = sum / slots;
+
+        Log.d("Speedcalculator",
+                "averageOf()\n" +
+                        "slots=" + slots +
+                        "\nsum=" + sum +
+                        "\nresult=" + result +
+                        "\nbuffer=[" + values + "]");
+
+        return result;
     }
 
     public enum Mode { DOWNLOAD, UPLOAD }

@@ -76,14 +76,21 @@ public class UploadWorker implements Runnable {
             @Override
             public void writeTo(BufferedSink sink) throws IOException {
                 long totalSent = 0;
+                long lastLogTime = System.currentTimeMillis();
                 while (!cancelled && totalSent < DECLARED_CONTENT_LENGTH) {
+                    long writeStart = System.currentTimeMillis();
                     long remaining = DECLARED_CONTENT_LENGTH - totalSent;
                     int toWrite = (int) Math.min(CHUNK_SIZE, remaining);
                     sink.write(CHUNK, 0, toWrite);
                     sink.flush();
+                    long writeElapsed = System.currentTimeMillis() - writeStart;
+                    if (writeElapsed > 200) {
+                        Log.w(TAG, "SLOW WRITE url=" + url + " tookMs=" + writeElapsed + " totalSent=" + totalSent);
+                    }
                     calculator.addUploadBytes(toWrite);
                     totalSent += toWrite;
                 }
+                Log.d(TAG, "writeTo loop EXIT totalSent=" + totalSent + " cancelled=" + cancelled);
             }
         };
 
