@@ -73,3 +73,42 @@ public class FastSpeedReader {
         }
     }
 }
+/**
+ *
+ * MainActivity
+ *       │
+ *       │
+ *       ▼
+ * FastSpeedReader
+ *       │
+ *       │ "Please start"
+ *       ▼
+ * SpeedTestManager
+ *       │
+ *       ▼
+ * Gets Token
+ *       │
+ *       ▼
+ * Gets Fast.com URLs
+ *       │
+ *       ▼
+ * Measures Latency
+ *       │
+ *       ▼
+ * Downloads Data
+ *       │
+ *       ▼
+ * Uploads Data
+ *       │
+ *       ▼
+ * Returns SpeedResult
+ *       │
+ *       ▼
+ * FastSpeedReader
+ *       │
+ *       ▼
+ * MainActivity
+ *       │
+ *       ▼
+ * Update Screen
+ */

@@ -88,3 +88,43 @@ public class DownloadWorker implements Runnable {
         }
     }
 }
+/*
+SpeedTestManager
+       │
+       │ creates 5 DownloadWorkers
+       ▼
+ExecutorService
+       │
+       ▼
+DownloadWorker.run()
+       │
+       ▼
+Create HTTP Request
+       │
+       ▼
+Execute Request
+       │
+       ▼
+Receive InputStream
+       │
+       ▼
+Read 32 KB chunks repeatedly
+       │
+       ▼
+calculator.addDownloadBytes(bytesRead)
+       │
+       ▼
+More bytes...
+       │
+       ▼
+After test duration (e.g. 15 seconds)
+       │
+       ▼
+SpeedTestManager calls cancel()
+       │
+       ▼
+Loop exits
+       │
+       ▼
+Thread finishes
+*/

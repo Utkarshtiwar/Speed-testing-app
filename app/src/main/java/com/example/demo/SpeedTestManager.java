@@ -2,6 +2,7 @@ package com.example.demo;
 
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 
 import org.json.JSONException;
 
@@ -38,6 +39,8 @@ import okhttp3.OkHttpClient;
  *   and suppresses any pending callbacks. Safe to call from any thread.
  */
 public class SpeedTestManager {
+
+    private static final String TAG = "SpeedTestManager";
 
     // ── Tunables ──────────────────────────────────────────────────────────────
     private static final int  PARALLEL_CONNECTIONS  = 5;    // simultaneous streams
@@ -131,6 +134,7 @@ public class SpeedTestManager {
             try {
                 token = tokenFetcher.fetchToken();
             } catch (IOException e) {
+                Log.e(TAG, "TOKEN FETCH FAILED: " + e.getMessage(), e);
                 postError("Could not load Fast.com configuration: " + e.getMessage());
                 return;
             }
@@ -144,16 +148,20 @@ public class SpeedTestManager {
             try {
                 targets = apiClient.getTargets(PARALLEL_CONNECTIONS);
             } catch (IOException | JSONException e) {
+                Log.e(TAG, "API TARGETS FAILED: " + e.getMessage(), e);
                 postError("Could not reach Fast.com API: " + e.getMessage());
                 return;
             }
+            Log.d(TAG, "TARGETS OK count=" + targets.urls.size());
 
             if (destroyed) return;
 
             // ── Phase 1: Latency ──────────────────────────────────────────────
+            Log.d(TAG, "START LATENCY");
             postStatus("Measuring latency…", false);
             LatencyTester latencyTester = new LatencyTester(httpClient);
             long latencyMs = latencyTester.measureLatency(targets.urls);
+            Log.d(TAG, "LATENCY COMPLETE ms=" + latencyMs);
             if (latencyMs > 0) {
                 currentLatency = String.valueOf(latencyMs);
                 postUpdate(false);
@@ -162,23 +170,33 @@ public class SpeedTestManager {
             if (destroyed) return;
 
             // ── Phase 2: Download ─────────────────────────────────────────────
+            Log.d(TAG, "START DOWNLOAD");
             postStatus("Testing download speed…", false);
             runDownloadPhase(targets.urls);
+            Log.d(TAG, "DOWNLOAD COMPLETE mbps=" + currentDownload);
 
-            if (destroyed) return;
+            if (destroyed) {
+                Log.d(TAG, "DESTROYED after download — upload will NOT run");
+                return;
+            }
 
             // ── Phase 3: Upload ───────────────────────────────────────────────
+            Log.d(TAG, "START UPLOAD");
             postStatus("Testing upload speed…", false);
             calculator.resetUpload();
             runUploadPhase(targets.urls);
+            Log.d(TAG, "UPLOAD COMPLETE mbps=" + currentUpload);
 
             if (destroyed) return;
 
             // ── Complete ──────────────────────────────────────────────────────
             stopSampler();
+            Log.d(TAG, "FINAL RESULT download=" + currentDownload
+                    + " upload=" + currentUpload + " latency=" + currentLatency);
             postFinalResult();
 
         } catch (Exception e) {
+            Log.e(TAG, "PIPELINE EXCEPTION: " + e, e);
             if (!destroyed) {
                 postError("Speed test failed: " + e.getMessage());
             }
@@ -202,24 +220,32 @@ public class SpeedTestManager {
             synchronized (downloadWorkers) { downloadWorkers.add(worker); }
             futures.add(workExecutor.submit(worker));
         }
+        Log.d(TAG, "DOWNLOADING — " + futures.size() + " workers submitted");
 
         // Wait for measurement window
         Thread.sleep(DOWNLOAD_DURATION_MS);
 
-        // Cancel all workers
+        // Stop sampling and capture the final speed IMMEDIATELY — before any
+        // cancellation/join happens. If we wait until after cancel()+join(),
+        // the sampler (still firing every 200ms) keeps computing deltas against
+        // a counter that has stopped increasing, which pushes 0 Mbps samples
+        // into the rolling buffer and drags the average down to 0 by the time
+        // we read it. Capturing right here preserves the true final value.
+        stopSampler();
+        currentDownload = Speedcalculator.format(calculator.getCurrentDownloadMbps());
+        Log.d(TAG, "Download Average (captured pre-cancel) = " + currentDownload);
+
+        // Cancel all workers (cleanup only — no longer affects the captured value)
         synchronized (downloadWorkers) {
             for (DownloadWorker w : downloadWorkers) w.cancel();
         }
 
         // Wait for workers to exit (brief, OkHttp cancellation is fast)
         for (Future<?> f : futures) {
-            try { f.get(2, TimeUnit.SECONDS); } catch (Exception ignored) {}
+            try { f.get(2, TimeUnit.SECONDS); } catch (Exception e) {
+                Log.w(TAG, "download worker did not exit cleanly: " + e);
+            }
         }
-
-        stopSampler();
-
-        // Capture final download speed
-        currentDownload = Speedcalculator.format(calculator.getCurrentDownloadMbps());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -237,20 +263,28 @@ public class SpeedTestManager {
             synchronized (uploadWorkers) { uploadWorkers.add(worker); }
             futures.add(workExecutor.submit(worker));
         }
+        Log.d(TAG, "UPLOADING — " + futures.size() + " workers submitted");
 
         Thread.sleep(UPLOAD_DURATION_MS);
+
+        // Same fix as download: capture the average BEFORE cancelling/joining
+        // workers. Otherwise the sampler keeps running during the cancel/join
+        // window, sees byte counters that have stopped moving, samples 0 Mbps
+        // repeatedly, and overwrites the 8-slot rolling buffer with zeros —
+        // which is exactly why "upload fluctuates correctly, then shows 0".
+        stopSampler();
+        currentUpload = Speedcalculator.format(calculator.getCurrentUploadMbps());
+        Log.d(TAG, "Upload Average (captured pre-cancel) = " + currentUpload);
 
         synchronized (uploadWorkers) {
             for (UploadWorker w : uploadWorkers) w.cancel();
         }
 
         for (Future<?> f : futures) {
-            try { f.get(2, TimeUnit.SECONDS); } catch (Exception ignored) {}
+            try { f.get(2, TimeUnit.SECONDS); } catch (Exception e) {
+                Log.w(TAG, "upload worker did not exit cleanly: " + e);
+            }
         }
-
-        stopSampler();
-
-        currentUpload = Speedcalculator.format(calculator.getCurrentUploadMbps());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -267,8 +301,10 @@ public class SpeedTestManager {
 
             if (mode == Speedcalculator.Mode.DOWNLOAD) {
                 currentDownload = Speedcalculator.format(calculator.getCurrentDownloadMbps());
+                Log.d(TAG, "Current Download = " + currentDownload + " Mbps");
             } else {
                 currentUpload = Speedcalculator.format(calculator.getCurrentUploadMbps());
+                Log.d(TAG, "Current Upload = " + currentUpload + " Mbps");
             }
             postUpdate(false);
         }, UI_UPDATE_INTERVAL_MS, UI_UPDATE_INTERVAL_MS, TimeUnit.MILLISECONDS);
@@ -297,8 +333,12 @@ public class SpeedTestManager {
 
     private void postFinalResult() {
         if (destroyed) return;
+        Log.d(TAG, "Upload Finished");
+        Log.d(TAG, "Creating Final SpeedResult");
+        Log.d(TAG, "Final Upload = " + currentUpload + " Mbps");
         SpeedResult result = new SpeedResult(
                 currentDownload, currentUpload, currentLatency, true);
+        Log.d(TAG, "Sending Callback");
         mainHandler.post(() -> {
             if (!destroyed) listener.onUpdate(result);
         });

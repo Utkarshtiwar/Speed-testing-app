@@ -1,5 +1,7 @@
 package com.example.demo;
 
+import android.util.Log;
+
 import java.io.IOException;
 
 import okhttp3.Call;
@@ -28,8 +30,14 @@ import okio.BufferedSink;
  */
 public class UploadWorker implements Runnable {
 
+    private static final String TAG                 = "UploadWorker";
     private static final int    CHUNK_SIZE          = 64 * 1024;        // 64 KB per write
     private static final long   MAX_UPLOAD_BYTES    = 200 * 1024 * 1024; // 200 MB safety cap
+    // Declared, finite content length. contentLength() == -1 forces OkHttp to send
+    // Transfer-Encoding: chunked, and Netflix's OCA speedtest/upload route returns
+    // an immediate error for chunked bodies — this is what was silently killing
+    // every upload before any bytes were even counted.
+    private static final long   DECLARED_CONTENT_LENGTH = MAX_UPLOAD_BYTES;
     private static final MediaType OCTET_STREAM = MediaType.parse("application/octet-stream");
 
     private final OkHttpClient    client;
@@ -50,6 +58,8 @@ public class UploadWorker implements Runnable {
 
     @Override
     public void run() {
+        Log.d(TAG, "UPLOAD WORKER START url=" + url);
+
         RequestBody body = new RequestBody() {
             @Override
             public MediaType contentType() {
@@ -58,23 +68,28 @@ public class UploadWorker implements Runnable {
 
             @Override
             public long contentLength() {
-                return -1;  // Unknown / streaming — no Content-Length header
+                // Finite, declared length avoids chunked Transfer-Encoding, which
+                // some CDN upload endpoints reject outright.
+                return DECLARED_CONTENT_LENGTH;
             }
 
             @Override
             public void writeTo(BufferedSink sink) throws IOException {
                 long totalSent = 0;
-                while (!cancelled && totalSent < MAX_UPLOAD_BYTES) {
-                    sink.write(CHUNK);
+                while (!cancelled && totalSent < DECLARED_CONTENT_LENGTH) {
+                    long remaining = DECLARED_CONTENT_LENGTH - totalSent;
+                    int toWrite = (int) Math.min(CHUNK_SIZE, remaining);
+                    sink.write(CHUNK, 0, toWrite);
                     sink.flush();
-                    calculator.addUploadBytes(CHUNK_SIZE);
-                    totalSent += CHUNK_SIZE;
+                    calculator.addUploadBytes(toWrite);
+                    totalSent += toWrite;
                 }
             }
         };
 
         // Append /upload to the target URL (Fast.com CDN accepts POST at this path)
         String uploadUrl = buildUploadUrl(url);
+        Log.d(TAG, "UPLOADING to " + uploadUrl);
 
         Request request = new Request.Builder()
                 .url(uploadUrl)
@@ -91,13 +106,26 @@ public class UploadWorker implements Runnable {
         activeCall = client.newCall(request);
 
         try (Response response = activeCall.execute()) {
+            Log.d(TAG, "UPLOAD response code=" + response.code());
+            if (!response.isSuccessful()) {
+                Log.w(TAG, "UPLOAD non-2xx response: " + response.code() + " " + response.message());
+            }
             // Response body doesn't matter — we only care about bytes sent
             if (response.body() != null) {
                 response.body().close();
             }
         } catch (IOException e) {
-            // Expected on cancel() — not an error
+            if (cancelled) {
+                Log.d(TAG, "UPLOAD WORKER cancelled (expected): " + e.getMessage());
+            } else {
+                // This was previously swallowed silently — it is NOT expected
+                // when cancelled == false, and is almost certainly the reason
+                // uploads appeared to "never complete".
+                Log.e(TAG, "UPLOAD WORKER FAILED (not a cancellation): " + e, e);
+            }
         }
+
+        Log.d(TAG, "UPLOAD WORKER EXIT cancelled=" + cancelled);
     }
 
     public void cancel() {

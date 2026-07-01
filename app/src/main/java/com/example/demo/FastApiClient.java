@@ -132,3 +132,44 @@ public class FastApiClient {
         return DEFAULT_URL_COUNT;
     }
 }
+
+/*
+App starts
+     │
+     ▼
+FastApiClient
+     │
+     ▼
+"Hello Fast.com!"
+     │
+     ▼
+"Here is my token."
+     │
+     ▼
+"Please give me 5 download servers."
+     │
+     ▼
+Fast.com replies
+     │
+     ▼
+{
+   targets:
+   [
+      URL1
+      URL2
+      URL3
+      URL4
+      URL5
+   ]
+}
+     │
+     ▼
+Store every URL in a List
+     │
+     ▼
+Return the List to SpeedTestManager
+     │
+     ▼
+DownloadWorker starts downloading from those URLs
+
+* */

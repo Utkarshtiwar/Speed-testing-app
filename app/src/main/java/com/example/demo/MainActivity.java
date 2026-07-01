@@ -2,6 +2,7 @@ package com.example.demo;
 
 import android.graphics.Color;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -74,7 +75,11 @@ public class MainActivity extends AppCompatActivity {
         fastSpeedReader.startTest();
     }
 
+    private static final String TAG = "MainActivity";
+
     private void updateUI(SpeedResult result) {
+        Log.d(TAG, "MainActivity Received Upload = " + result.getUploadSpeed() + " Mbps");
+
         // Parse download speed for the meter
         float downloadVal = 0f;
         try {
@@ -89,7 +94,9 @@ public class MainActivity extends AppCompatActivity {
         String lat = result.getLatency();
 
         tvDownload.setText((dl.isEmpty()  || dl.equals("0"))  ? "— Mbps" : dl  + " Mbps");
-        tvUpload.setText(  (ul.isEmpty()  || ul.equals("0"))  ? "— Mbps" : ul  + " Mbps");
+        String uploadText = (ul.isEmpty()  || ul.equals("0"))  ? "— Mbps" : ul  + " Mbps";
+        Log.d(TAG, "Updating TextView = " + uploadText);
+        tvUpload.setText(uploadText);
         tvLatency.setText( (lat.isEmpty() || lat.equals("0")) ? "— ms"   : lat + " ms");
 
         if (result.isCompleted()) {
